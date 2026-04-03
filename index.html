@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Piano Analyzer</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist+Mono:wght@300;400;500;600&family=Geist:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0c0b09;--paper:#f5f0e8;--warm:#eee7d8;--rule:#ccc4b0;
+  --rule2:#ddd5c4;--dim:#8a7f6e;--faint:#b8ae9e;--accent:#1a1409;
+  --red:#8b1a1a;--redb:#c42b2b;--green:#1a4a2a;--greenb:#2d7a47;
+  --gold:#7a5a0a;--goldb:#c49020;--blue:#0a2a4a;--blueb:#1a6aaa;
+  --r:4px;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  background:var(--paper);color:var(--accent);
+  font-family:'Geist',sans-serif;font-size:13px;
+  display:flex;flex-direction:column;position:relative;
+}
+body::after{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+}
+
+/* ── SPLASH ─────────────────────────────────────────────────────── */
+#splash{
+  position:fixed;inset:0;z-index:100;
+  background:var(--ink);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:opacity 0.7s ease,transform 0.7s ease;
+}
+#splash.out{opacity:0;transform:scale(1.04);pointer-events:none}
+.sp-title{
+  font-family:'Instrument Serif',serif;
+  font-size:clamp(38px,7vw,80px);color:var(--paper);
+  letter-spacing:-0.025em;line-height:1;margin-bottom:4px;
+}
+.sp-sub{
+  font-family:'Geist Mono',monospace;font-size:10px;
+  letter-spacing:0.22em;text-transform:uppercase;
+  color:#4a4030;margin-bottom:52px;
+}
+.sp-panel{
+  width:min(380px,88vw);display:flex;flex-direction:column;
+  align-items:center;gap:18px;
+}
+.sp-phase-label{
+  font-family:'Geist Mono',monospace;font-size:9px;
+  letter-spacing:0.18em;text-transform:uppercase;color:#4a4030;
+  align-self:flex-start;
+}
+.sp-msg{
+  font-size:14px;color:var(--paper);font-weight:300;
+  text-align:center;line-height:1.55;min-height:52px;
+  transition:opacity 0.25s;
+}
+.sp-bar-track{width:100%;height:1px;background:#1e1a14;}
+.sp-bar-fill{height:100%;background:var(--paper);width:0%;transition:width 0.35s ease;}
+
+/* Calibration ring */
+.ring-wrap{position:relative;width:110px;height:110px;}
+.ring-wrap svg{display:block;width:100%;height:100%;}
+.rt{fill:none;stroke:#1c1710;stroke-width:2.5;}
+.rf{
+  fill:none;stroke:var(--paper);stroke-width:2.5;stroke-linecap:round;
+  stroke-dasharray:298;stroke-dashoffset:298;
+  transform:rotate(-90deg);transform-origin:55px 55px;
+  transition:stroke-dashoffset 0.5s ease;
+}
+.ring-center{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+}
+.ring-pct{
+  font-family:'Geist Mono',monospace;font-size:20px;
+  font-weight:500;color:var(--paper);line-height:1;
+}
+.ring-state{
+  font-size:8px;letter-spacing:0.12em;text-transform:uppercase;
+  color:#4a4030;margin-top:2px;
+}
+.calib-stats{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:7px;width:100%;
+}
+.cs-cell{
+  background:#111008;border-radius:3px;
+  padding:8px;text-align:center;
+}
+.cs-val{
+  font-family:'Geist Mono',monospace;font-size:15px;
+  font-weight:500;color:var(--paper);line-height:1;
+}
+.cs-lbl{
+  font-size:7px;letter-spacing:0.14em;text-transform:uppercase;
+  color:#3a3020;margin-top:3px;
+}
+
+/* ── APP ─────────────────────────────────────────────────────────── */
+#app{
+  flex:1;display:flex;flex-direction:column;overflow:hidden;
+  max-width:980px;width:100%;margin:0 auto;padding:0 14px 10px;
+}
+.app-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0 9px;border-bottom:1px solid var(--rule);flex-shrink:0;
+}
+.app-title{
+  font-family:'Instrument Serif',serif;font-size:19px;
+  letter-spacing:-0.01em;color:var(--accent);
+}
+.app-title em{font-style:italic;color:var(--dim);}
+.pills{display:flex;align-items:center;gap:7px;}
+.pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 9px;border-radius:20px;
+  border:1px solid var(--rule);background:var(--warm);
+  font-family:'Geist Mono',monospace;font-size:8px;
+  letter-spacing:0.1em;text-transform:uppercase;color:var(--dim);
+}
+.pill.live{border-color:var(--greenb);color:var(--greenb);background:rgba(45,122,71,0.07);}
+.pill.tuned{border-color:var(--goldb);color:var(--gold);background:rgba(196,144,32,0.07);}
+.pdot{width:5px;height:5px;border-radius:50%;background:currentColor;}
+.pill.live .pdot{animation:blink 1.4s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}
+
+/* Spectrum */
+.spec-wrap{
+  position:relative;height:78px;margin-top:9px;flex-shrink:0;
+  background:var(--ink);border-radius:var(--r);overflow:hidden;
+}
+#specCanvas{display:block;width:100%;height:100%;}
+.spec-ticks{
+  position:absolute;bottom:3px;left:0;right:0;
+  display:flex;justify-content:space-between;padding:0 7px;
+  pointer-events:none;
+}
+.st{
+  font-family:'Geist Mono',monospace;font-size:7px;
+  color:rgba(245,240,232,0.18);letter-spacing:0.05em;
+}
+
+/* Active notes strip */
+.active-wrap{
+  margin-top:7px;flex-shrink:0;
+  min-height:42px;padding:7px 12px;
+  background:var(--warm);border:1px solid var(--rule);border-radius:var(--r);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+}
+.an-label{
+  font-family:'Geist Mono',monospace;font-size:7px;
+  letter-spacing:0.16em;text-transform:uppercase;color:var(--faint);
+  flex-shrink:0;margin-right:2px;
+}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:3px 9px;border-radius:3px;
+  background:var(--ink);color:var(--paper);
+  font-family:'Geist Mono',monospace;font-size:12px;font-weight:500;
+  border-left:3px solid var(--paper);letter-spacing:0.03em;
+  transition:border-color 0.2s,color 0.2s,opacity 0.2s;
+}
+.chip.sustaining{border-left-color:var(--goldb);color:var(--goldb);opacity:0.8;}
+.chip.releasing {border-left-color:var(--rule);color:var(--dim);opacity:0.5;}
+.ch-hz{font-size:8px;color:#3a3020;font-weight:300;}
+.ch-c{font-size:8px;letter-spacing:0;}
+.ch-c.flat{color:var(--blueb);}
+.ch-c.sharp{color:var(--redb);}
+.ch-c.in{color:var(--greenb);}
+
+/* List */
+.list-hdr{
+  display:grid;
+  grid-template-columns:58px 54px 68px 1fr 68px 56px 64px;
+  padding:5px 12px;margin-top:7px;flex-shrink:0;
+  background:var(--ink);border-radius:var(--r) var(--r) 0 0;
+}
+.lh{
+  font-family:'Geist Mono',monospace;font-size:7px;
+  letter-spacing:0.14em;text-transform:uppercase;color:#3a3020;
+}
+.note-list{
+  flex:1;overflow-y:auto;overflow-x:hidden;
+  background:var(--ink);border-radius:0 0 var(--r) var(--r);
+  border-top:1px solid #181410;min-height:0;
+}
+.note-list::-webkit-scrollbar{width:3px;}
+.note-list::-webkit-scrollbar-track{background:#0c0b09;}
+.note-list::-webkit-scrollbar-thumb{background:#252015;border-radius:2px;}
+.note-list::-webkit-scrollbar-thumb:hover{background:#3a3020;}
+
+.ne{
+  display:grid;
+  grid-template-columns:58px 54px 68px 1fr 68px 56px 64px;
+  align-items:center;padding:0 12px;height:36px;
+  border-bottom:1px solid #121008;
+  animation:si 0.16s ease forwards;
+}
+.ne:hover{background:#0f0e0b;}
+.ne:last-child{border-bottom:none;}
+@keyframes si{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+
+.ne-t  {font-family:'Geist Mono',monospace;font-size:9px;color:#2a2418;}
+.ne-ev {font-family:'Geist Mono',monospace;font-size:8px;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;}
+.ne-ev.on {color:var(--greenb);}
+.ne-ev.off{color:#2a2418;}
+.ne-nn {font-family:'Instrument Serif',serif;font-size:16px;color:var(--paper);letter-spacing:0.02em;}
+.ne-nn.off{color:#2a2418;font-style:italic;}
+.ne-bar-col{display:flex;flex-direction:column;gap:3px;}
+.ne-conf-bar{height:2px;background:#181410;border-radius:1px;}
+.ne-conf-fill{height:100%;background:var(--paper);border-radius:1px;}
+.ne-hz  {font-family:'Geist Mono',monospace;font-size:9px;color:#2a2418;text-align:right;}
+.ne-dur {font-family:'Geist Mono',monospace;font-size:9px;color:#2a2418;text-align:right;}
+.ne-c   {font-family:'Geist Mono',monospace;font-size:9px;text-align:right;letter-spacing:0;}
+.ne-c.flat {color:var(--blueb);}
+.ne-c.sharp{color:var(--redb);}
+.ne-c.in   {color:var(--greenb);}
+
+.empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:7px;padding:44px;height:180px;
+}
+.empty-icon{font-size:26px;opacity:0.12;}
+.empty-txt{
+  font-family:'Geist Mono',monospace;font-size:9px;
+  letter-spacing:0.14em;text-transform:uppercase;color:#222018;
+}
+
+/* Footer */
+.footer{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding-top:7px;border-top:1px solid var(--rule);flex-shrink:0;
+}
+.cg{display:flex;align-items:center;gap:6px;}
+.cl{
+  font-family:'Geist Mono',monospace;font-size:7px;
+  letter-spacing:0.14em;text-transform:uppercase;color:var(--faint);
+}
+.cs{
+  -webkit-appearance:none;appearance:none;
+  width:68px;height:2px;background:var(--rule);
+  border-radius:1px;outline:none;cursor:pointer;
+}
+.cs::-webkit-slider-thumb{
+  -webkit-appearance:none;width:10px;height:10px;
+  border-radius:50%;background:var(--accent);cursor:pointer;
+}
+.cv{font-family:'Geist Mono',monospace;font-size:8px;color:var(--dim);min-width:28px;}
+.sep{flex:1;}
+.cnt{font-family:'Geist Mono',monospace;font-size:8px;color:var(--faint);}
+.cbtn{
+  font-family:'Geist Mono',monospace;font-size:8px;
+  letter-spacing:0.1em;text-transform:uppercase;
+  padding:4px 11px;border-radius:3px;
+  border:1px solid var(--rule);background:none;
+  color:var(--dim);cursor:pointer;
+  transition:border-color 0.15s,color 0.15s;
+}
+.cbtn:hover{border-color:var(--redb);color:var(--redb);}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ SPLASH ═══════════ -->
+<div id="splash">
+  <div class="sp-title">Piano Analyzer</div>
+  <div class="sp-sub">Frequency · Calibration · Notation</div>
+
+  <div class="sp-panel" id="phPerm">
+    <div class="sp-phase-label">Microphone access</div>
+    <div class="sp-msg" id="permMsg">Requesting microphone permission…</div>
+    <div class="sp-bar-track"><div class="sp-bar-fill" id="permBar"></div></div>
+  </div>
+
+  <div class="sp-panel" id="phCalib" style="display:none">
+    <div class="sp-phase-label">Calibrating — play your piano</div>
+    <div class="ring-wrap">
+      <svg viewBox="0 0 110 110">
+        <circle class="rt" cx="55" cy="55" r="47.5"/>
+        <circle class="rf" id="ringFill" cx="55" cy="55" r="47.5"/>
+      </svg>
+      <div class="ring-center">
+        <div class="ring-pct"  id="ringPct">0%</div>
+        <div class="ring-state" id="ringState">Listening</div>
+      </div>
+    </div>
+    <div class="sp-msg" id="calibMsg">
+      Play a few notes across the keyboard.<br>
+      The analyzer is learning your instrument.
+    </div>
+    <div class="calib-stats">
+      <div class="cs-cell"><div class="cs-val" id="csNotes">0</div><div class="cs-lbl">Notes</div></div>
+      <div class="cs-cell"><div class="cs-val" id="csSNR">—</div><div class="cs-lbl">SNR dB</div></div>
+      <div class="cs-cell"><div class="cs-val" id="csTune">—</div><div class="cs-lbl">Tuning</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ APP ═══════════ -->
+<div id="app">
+  <div class="app-header">
+    <div class="app-title">Piano <em>Analyzer</em></div>
+    <div class="pills">
+      <div class="pill" id="livePill">
+        <div class="pdot"></div>
+        <span id="liveText">Initializing</span>
+      </div>
+      <div class="pill" id="tunePill">
+        <span id="tuneText">Calibrating…</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="spec-wrap">
+    <canvas id="specCanvas"></canvas>
+    <div class="spec-ticks">
+      <span class="st">A0</span><span class="st">C2</span><span class="st">C3</span>
+      <span class="st">C4</span><span class="st">C5</span><span class="st">C6</span>
+      <span class="st">C7</span><span class="st">C8</span>
+    </div>
+  </div>
+
+  <div class="active-wrap" id="activeWrap">
+    <span class="an-label">Now</span>
+  </div>
+
+  <div class="list-hdr">
+    <span class="lh">Time</span>
+    <span class="lh">Event</span>
+    <span class="lh">Note</span>
+    <span class="lh">Confidence</span>
+    <span class="lh" style="text-align:right">Hz</span>
+    <span class="lh" style="text-align:right">Dur</span>
+    <span class="lh" style="text-align:right">Cents</span>
+  </div>
+
+  <div class="note-list" id="noteList">
+    <div class="empty" id="emptyEl">
+      <div class="empty-icon">♩</div>
+      <div class="empty-txt">Waiting for notes</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="cg">
+      <span class="cl">Sensitivity</span>
+      <input type="range" class="cs" id="sensSlider" min="0.4" max="3.0" step="0.1" value="1.0">
+      <span class="cv" id="sensVal">1.0×</span>
+    </div>
+    <div class="cg">
+      <span class="cl">Hold</span>
+      <input type="range" class="cs" id="holdSlider" min="5" max="70" step="5" value="25">
+      <span class="cv" id="holdVal">25f</span>
+    </div>
+    <div class="sep"></div>
+    <span class="cnt" id="evtCount">0 events</span>
+    <button class="cbtn" id="clearBtn">Clear</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════════════════
+//  PIANO ANALYZER
+//
+//  Pipeline:
+//   Phase 0  Permission
+//   Phase 1  Silence scan  (CALIB_SILENCE_FRAMES of quiet builds noise floor)
+//   Phase 2  Listening     (user plays; tuning offsets + SNR are learned;
+//                           calibration completes when CALIB_NOTES_NEEDED
+//                           distinct pitch classes confirmed with good hScore)
+//   Phase 3  Running       (full detection, hold tracker, event log)
+//
+//  Per-note detection:
+//   CONFIRMING → ACTIVE → SUSTAINING → RELEASING → gone
+//   Each note tracks IIR energy vs peak; sustain = still above SUSTAIN_RATIO;
+//   release countdown = HOLD_FRAMES frames after dropping below floor.
+//
+//  Coincidental partials:
+//   harmonicScore() checks whether the 8 harmonics above a candidate
+//   fundamental match a piano timbre profile [1, 0.55, 0.28 …].
+//   Peaks that don't pass a minimum timbre score are discarded — this
+//   rejects broadband noise, room resonances, and accidental resonances
+//   whose partial structure is not piano-like.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const PIANO_LO   = 27.5;
+const PIANO_HI   = 4186.0;
+const FFT_N      = 8192;
+const RING_C     = 298.5;   // 2π × r=47.5
+
+// ── Calibration config ─────────────────────────────────────────────────────
+// Silence scan: just count any frame that arrives — don't demand true silence,
+// most rooms have some hum. We still run noise-floor EMA every frame.
+const CALIB_SILENCE_FRAMES = 30;   // ~1 s at 30 fps — fast enough to not frustrate
+const CALIB_NOTES_NEEDED   = 6;    // 6 distinct pitch classes is plenty to calibrate
+const CALIB_NOTE_FRAMES    = 3;    // frames a peak must persist to count as a note
+// No minimum harmonic score during calibration — use a very loose gate
+// so we can collect data about the real piano being played
+const CALIB_MAG_MIN        = 0.06; // peak must be at least 6% of the clean max
+
+// ── Detection config ───────────────────────────────────────────────────────
+const CONFIRM_FRAMES  = 2;
+const SUSTAIN_RATIO   = 0.12;
+const ENERGY_DECAY    = 0.87;
+const SNR_GATE_BASE   = 1.8;   // start permissive; user can tighten with sensitivity
+const MAX_POLYPHONY   = 8;
+const MIN_HSCOREN     = 0.28;  // harmonic score gate — loose, tightens post-calib
+
+// Piano timbre model h1…h8 (normalised to 1.0)
+const TIMBRE = [1.0, 0.55, 0.28, 0.14, 0.075, 0.038, 0.018, 0.009];
+
+// ── App state ──────────────────────────────────────────────────────────────
+let audioCtx = null, analyserV = null, analyserD = null;
+let sessionStart = 0;
+let holdFrames   = 25;
+let sensMul      = 1.0;
+
+const calib = {
+  phase:      'permission',
+  silCount:   0,
+  notesSeen:  new Set(),       // confirmed pitch classes (0-11)
+  notesBuf:   new Map(),       // midi → consecutive frames above threshold
+  tuneOffset: new Float32Array(12),
+  tuneWeight: new Float32Array(12),
+  noiseFloor: null,            // Float32Array(binCount)
+  noiseFrames:0,
+  pianoE:     0,
+  noiseE:     0,
+  snrBuf:     [],
+  done:       false,
+};
+
+const noteStates = new Map();  // active note lifecycle tracking
+const events     = [];
+
+// ── Math helpers ───────────────────────────────────────────────────────────
+const f2m = f => f > 0 ? 69 + 12 * Math.log2(f / 440) : null;
+const m2f = m => 440 * Math.pow(2, (m - 69) / 12);
+const m2n = m => {
+  m = Math.round(m);
+  return NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+};
+const elapsed = () => (performance.now() - sessionStart) / 1000;
+
+// ── Noise floor EMA ────────────────────────────────────────────────────────
+// Called every frame — even during silence scan and during piano playing.
+// Uses fast alpha for the first 30 frames, then slow tracking.
+function updateNoise(lin, n) {
+  if (!calib.noiseFloor) {
+    calib.noiseFloor = new Float32Array(n);
+    calib.noiseFrames = 0;
+  }
+  const a = calib.noiseFrames < 30 ? 0.15 : 0.015;
+  for (let i = 0; i < n; i++)
+    calib.noiseFloor[i] = calib.noiseFloor[i] * (1 - a) + lin[i] * a;
+  calib.noiseFrames++;
+}
+
+// ── Spectral subtraction ───────────────────────────────────────────────────
+// Subtracts the estimated noise floor from the spectrum.
+// gate = how many × the floor a bin must exceed to survive.
+function cleanSpec(lin, n, gate) {
+  const out = new Float32Array(n);
+  if (!calib.noiseFloor) {
+    // No floor yet — return raw linear magnitudes so calibration can start
+    for (let i = 0; i < n; i++) out[i] = lin[i];
+    return out;
+  }
+  for (let i = 0; i < n; i++) {
+    const floor = calib.noiseFloor[i] * gate;
+    out[i] = lin[i] > floor ? lin[i] - calib.noiseFloor[i] : 0;
+  }
+  return out;
+}
+
+// ── Harmonic score ─────────────────────────────────────────────────────────
+// Given a candidate fundamental at fundFreq, check how well the 8 harmonics
+// match a piano timbre profile in the NORMALISED spectrum (0-1 values).
+// The normalised spectrum peak = 1.0, so TIMBRE[0] = 1.0 means "the
+// fundamental should be the loudest bin" — consistent with the data.
+function harmonicScore(fundFreq, normMag, fRes, n) {
+  let score = 0, total = 0;
+  for (let h = 0; h < TIMBRE.length; h++) {
+    const hf = fundFreq * (h + 1);
+    if (hf > PIANO_HI * 1.05) break;
+    const bin = Math.round(hf / fRes);
+    if (bin < 1 || bin >= n) continue;
+    const expected = TIMBRE[h];
+    total += expected;
+    // Search ±3 bins for the partial (real piano strings are slightly inharmonic)
+    let bestVal = 0;
+    for (let d = -3; d <= 3; d++) {
+      const b2 = bin + d;
+      if (b2 >= 1 && b2 < n && normMag[b2] > bestVal) bestVal = normMag[b2];
+    }
+    // Partial is "present" if it's at least 20% of the expected relative level.
+    // We compare against expected/TIMBRE[0] = expected (since TIMBRE[0]=1.0).
+    const threshold = expected * 0.20;
+    if (bestVal >= threshold) {
+      // Full credit if ≥ expected, partial credit down to threshold
+      score += expected * Math.min(1, bestVal / expected);
+    }
+  }
+  return total > 0 ? Math.min(1, score / total) : 0;
+}
+
+// ── Core frame processing ──────────────────────────────────────────────────
+function processFrame(dbData, sr, n, fRes) {
+
+  // ── 1. dB → linear ──────────────────────────────────────────────────────
+  const lin = new Float32Array(n);
+  let maxRaw = 0;
+  for (let i = 1; i < n; i++) {
+    const f = i * fRes;
+    if (f < PIANO_LO || f > PIANO_HI) continue;
+    const db = dbData[i];
+    if (!isFinite(db) || db < -160) continue;
+    const m = Math.pow(10, db / 20);
+    lin[i] = m;
+    if (m > maxRaw) maxRaw = m;
+  }
+
+  // ── 2. Always update noise floor ────────────────────────────────────────
+  // During the silence scan phase we update on every frame regardless.
+  // After that we update on quiet frames only (to not learn piano as noise).
+  if (calib.phase === 'silence' || maxRaw < 3e-5) {
+    updateNoise(lin, n);
+    if (calib.phase === 'silence') {
+      calib.silCount++;
+      calib.noiseE = calib.noiseE * 0.95 + maxRaw * 0.05;
+      if (calib.silCount >= CALIB_SILENCE_FRAMES) {
+        calib.phase = 'listening';
+        const el = document.getElementById('calibMsg');
+        if (el) el.textContent =
+          'Good\u2014now play notes across the keyboard to complete calibration.';
+      }
+      return [];   // don't detect during silence scan
+    }
+  }
+
+  // ── 3. Spectral subtraction ──────────────────────────────────────────────
+  const gate  = SNR_GATE_BASE * sensMul;
+  const clean = cleanSpec(lin, n, gate);
+
+  let cleanMax = 0;
+  for (let i = 0; i < n; i++) if (clean[i] > cleanMax) cleanMax = clean[i];
+  if (cleanMax < 1e-10) return [];
+
+  // Normalise: peak = 1.0  (this is what harmonicScore expects)
+  const norm = new Float32Array(n);
+  for (let i = 0; i < n; i++) norm[i] = clean[i] / cleanMax;
+
+  // ── 4. Peak picking ──────────────────────────────────────────────────────
+  const minDist = Math.max(3, Math.round(20 / fRes));
+  const peaks   = [];
+
+  for (let i = 4; i < n - 4; i++) {
+    const f = i * fRes;
+    if (f < PIANO_LO || f > PIANO_HI) continue;
+    if (norm[i] < 0.015) continue;
+
+    // Local max in ±4 bin window
+    let isMax = true;
+    for (let d = 1; d <= 4; d++) {
+      if (norm[i] <= norm[i-d] || norm[i] <= norm[i+d]) { isMax = false; break; }
+    }
+    if (!isMax) continue;
+
+    // Prominence ≥ 1% of normalised max
+    const lv = Math.min(norm[i-1], norm[i-2], norm[i-3]);
+    const rv = Math.min(norm[i+1], norm[i+2], norm[i+3]);
+    if (norm[i] - Math.max(lv, rv) < 0.010) continue;
+
+    // Sub-bin frequency interpolation
+    const a = norm[i-1], b = norm[i], c = norm[i+1];
+    const denom = 2*b - a - c;
+    const delta = (denom > 1e-10) ? Math.max(-0.5, Math.min(0.5, 0.5*(c-a)/denom)) : 0;
+    const rFreq = (i + delta) * fRes;
+
+    peaks.push({ bin: i, freq: rFreq, mag: norm[i] });
+  }
+
+  if (peaks.length === 0) return [];
+
+  // ── 5. Harmonic suppression ──────────────────────────────────────────────
+  peaks.sort((a, b) => b.mag - a.mag);
+  const suppressed = new Set();
+  const kept = [];
+  for (const p of peaks) {
+    if (suppressed.has(p.bin)) continue;
+    kept.push(p);
+    for (const q of peaks) {
+      if (q.bin === p.bin || suppressed.has(q.bin)) continue;
+      for (let h = 2; h <= 8; h++) {
+        if (Math.abs(p.freq * h - q.freq) / (p.freq * h) < 0.014) {
+          suppressed.add(q.bin); break;
+        }
+      }
+    }
+  }
+
+  // Min-distance enforcement
+  const distKept = [];
+  for (const p of kept) {
+    if (!distKept.some(k => Math.abs(k.bin - p.bin) < minDist))
+      distKept.push(p);
+  }
+
+  // ── 6. MIDI mapping + harmonic gate ─────────────────────────────────────
+  const detected = [];
+  for (const p of distKept.slice(0, MAX_POLYPHONY)) {
+
+    // Harmonic score uses normalised spectrum — correct reference
+    const hScore = harmonicScore(p.freq, norm, fRes, n);
+
+    // During calibration be very permissive; post-calibration use full gate
+    const minH = calib.done ? MIN_HSCOREN : MIN_HSCOREN * 0.5;
+    if (hScore < minH) continue;
+
+    const rawM = f2m(p.freq);
+    if (rawM === null) continue;
+
+    // Map to nearest MIDI, applying learned per-pitch-class tuning offset
+    let bestMidi = null, bestCents = Infinity;
+    for (let m = Math.floor(rawM) - 1; m <= Math.ceil(rawM) + 1; m++) {
+      if (m < 21 || m > 108) continue;
+      const pc     = ((m % 12) + 12) % 12;
+      const offset = (calib.done && calib.tuneWeight[pc] > 0.5)
+                     ? calib.tuneOffset[pc] : 0;
+      const adjF   = m2f(m) * Math.pow(2, offset / 1200);
+      const cents  = 1200 * Math.log2(p.freq / adjF);
+      if (Math.abs(cents) < Math.abs(bestCents)) {
+        bestCents = cents; bestMidi = m;
+      }
+    }
+    if (bestMidi === null || Math.abs(bestCents) > 55) continue;
+
+    // Feed tuning accumulator for any reasonably strong note
+    if (p.mag > 0.15) {
+      const pc = ((bestMidi % 12) + 12) % 12;
+      const w  = p.mag * Math.max(0.1, hScore);
+      calib.tuneOffset[pc] =
+        (calib.tuneOffset[pc] * calib.tuneWeight[pc] + bestCents * w)
+        / (calib.tuneWeight[pc] + w);
+      calib.tuneWeight[pc] += w;
+    }
+
+    detected.push({
+      midi: bestMidi, note: m2n(bestMidi),
+      freq: p.freq, mag: p.mag, hScore, centsOff: bestCents,
+    });
+
+    // ── Feed calibration note counter ─────────────────────────────────
+    // Threshold: any note above CALIB_MAG_MIN counts — we don't need
+    // a strict harmonic score here because we've already passed the minH gate
+    if (calib.phase === 'listening' && p.mag >= CALIB_MAG_MIN) {
+      const nb  = calib.notesBuf;
+      const cnt = (nb.get(bestMidi) || 0) + 1;
+      nb.set(bestMidi, cnt);
+
+      if (cnt >= CALIB_NOTE_FRAMES) {
+        const pc = ((bestMidi % 12) + 12) % 12;
+        if (!calib.notesSeen.has(pc)) {
+          calib.notesSeen.add(pc);
+          // Update SNR estimate
+          calib.pianoE = calib.pianoE * 0.9 + p.mag * 0.1;
+          const noiseRef = calib.noiseE > 0 ? calib.noiseE : 1e-6;
+          const snr = 20 * Math.log10((calib.pianoE + 1e-10) / (noiseRef + 1e-10));
+          calib.snrBuf.push(snr);
+          if (calib.snrBuf.length > 50) calib.snrBuf.shift();
+        }
+      }
+    }
+  }
+
+  // Decay stale entries in notesBuf (peaks that disappeared)
+  if (calib.phase === 'listening') {
+    const detectedMidis = new Set(detected.map(d => d.midi));
+    for (const [midi] of calib.notesBuf) {
+      if (!detectedMidis.has(midi)) calib.notesBuf.delete(midi);
+    }
+  }
+
+  // ── Calibration completion ──────────────────────────────────────────────
+  if (!calib.done && calib.phase === 'listening' &&
+      calib.notesSeen.size >= CALIB_NOTES_NEEDED) {
+    calib.done  = true;
+    calib.phase = 'done';
+    splashOut();
+  }
+
+  return detected;
+}
+
+// ── Controls ────────────────────────────────────────────────────────────────
+document.getElementById('sensSlider').addEventListener('input', e => {
+  sensMul = parseFloat(e.target.value);
+  document.getElementById('sensVal').textContent = sensMul.toFixed(1)+'×';
+});
+document.getElementById('holdSlider').addEventListener('input', e => {
+  holdFrames = parseInt(e.target.value);
+  document.getElementById('holdVal').textContent = holdFrames+'f';
+});
+document.getElementById('clearBtn').addEventListener('click', () => {
+  events.length = 0;
+  document.getElementById('noteList').innerHTML =
+    '<div class="empty" id="emptyEl"><div class="empty-icon">\u266a</div>' +
+    '<div class="empty-txt">Waiting for notes</div></div>';
+  document.getElementById('evtCount').textContent = '0 events';
+});
+
+window.addEventListener('DOMContentLoaded', () => { sizeCanvas(); init(); });
+</script>
+</body>
+</html>
