@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PianoML · Neural Transcription Engine</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Barlow+Condensed:wght@200;400;700;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:      #07080a;
+  --bg2:     #0e0f12;
+  --bg3:     #16171c;
+  --bg4:     #1d1e24;
+  --border:  #26272e;
+  --accent:  #ff6b1a;
+  --accent2: #ffaa44;
+  --midi:    #1af09a;
+  --wrong:   #ff2255;
+  --text:    #d4d4cc;
+  --text2:   #7a7a72;
+  --text3:   #3a3a42;
+  --mono:    'IBM Plex Mono', monospace;
+  --disp:    'Barlow Condensed', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  display: grid;
+  grid-template-rows: 50px 1fr 140px 30px;
+  grid-template-columns: 1fr;
+}
+
+/* ── HEADER ── */
+#header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  gap: 20px;
+}
+.logo-block { display: flex; flex-direction: column; justify-content: center; }
+.logo-title {
+  font-family: var(--disp);
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--accent);
+  text-transform: uppercase;
+  line-height: 1;
+}
+.logo-sub {
+  font-size: 8px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.divider { width: 1px; height: 28px; background: var(--border); }
+.status-bar { display: flex; gap: 14px; align-items: center; }
+.indicator {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: var(--text2);
+}
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--bg3); border: 1px solid var(--border);
+  transition: background .2s, box-shadow .2s;
+}
+.dot.on  { background: var(--accent);  border-color: var(--accent);  box-shadow: 0 0 6px var(--accent); }
+.dot.on2 { background: var(--midi);    border-color: var(--midi);    box-shadow: 0 0 6px var(--midi); }
+.dot.on3 { background: #44aaff;        border-color: #44aaff;        box-shadow: 0 0 6px #44aaff; }
+.header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.vu { display: flex; gap: 2px; align-items: flex-end; height: 18px; }
+.vu span {
+  width: 3px; background: var(--text3); border-radius: 1px;
+  transition: height .06s, background .1s;
+}
+#start-btn {
+  padding: 5px 18px;
+  background: var(--accent); border: none; color: #000;
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  letter-spacing: 3px; text-transform: uppercase;
+  cursor: pointer; border-radius: 2px;
+  transition: background .15s;
+}
+#start-btn:hover { background: var(--accent2); }
+#start-btn.running { background: var(--wrong); color: #fff; }
+
+/* ── MAIN GRID ── */
+#main {
+  display: grid;
+  grid-template-columns: 1.9fr 1.4fr 256px;
+  overflow: hidden;
+}
+.panel {
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.panel:last-child { border-right: none; }
+.ph {
+  padding: 7px 11px;
+  font-size: 8px; letter-spacing: 3px; text-transform: uppercase; color: var(--text2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
+}
+.ph-val { color: var(--accent2); font-size: 9px; letter-spacing: 1px; }
+.pb { flex: 1; overflow: hidden; position: relative; }
+
+/* ── SPECTROGRAM ── */
+#spec-canvas { display: block; width: 100%; height: 100%; }
+
+/* ── TABS ── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg2); }
+.tab {
+  padding: 8px 12px; font-family: var(--mono);
+  font-size: 8px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--text3); cursor: pointer; background: none;
+  border: none; border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.tab:hover { color: var(--text2); }
+.tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.tc { display: none; flex: 1; overflow-y: auto; padding: 10px; }
+.tc.on { display: block; }
+
+/* ── SCROLLBARS ── */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); }
+
+/* ── NOTE CHIPS ── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 4px; min-height: 26px; }
+.chip {
+  padding: 3px 7px; border-radius: 2px; font-size: 11px; font-weight: 700;
+  border: 1px solid; letter-spacing: .5px; transition: all .08s;
+}
+.chip.au  { background: rgba(255,107,26,.12); border-color: var(--accent);  color: var(--accent); }
+.chip.mi  { background: rgba(26,240,154,.10); border-color: var(--midi);    color: var(--midi); }
+.chip.ok  { background: rgba(26,240,154,.22); border-color: var(--midi);    color: var(--midi); box-shadow: 0 0 5px rgba(26,240,154,.35); }
+.chip.err { background: rgba(255,34,85,.18);  border-color: var(--wrong);   color: var(--wrong); }
+.chip.ex  { background: rgba(255,170,68,.12); border-color: var(--accent2); color: var(--accent2); }
+.chip.ml  { background: rgba(68,170,255,.12); border-color: #44aaff;        color: #44aaff; }
+
+/* ── CHORD DISPLAY ── */
+.chord-name {
+  font-family: var(--disp); font-size: 46px; font-weight: 900;
+  line-height: 1; min-height: 50px; letter-spacing: -1px;
+}
+.chord-root { color: var(--accent); }
+.chord-qual { color: var(--text2); font-size: 32px; }
+
+/* ── FREQ ROWS ── */
+.frow {
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 0; border-bottom: 1px solid var(--bg3);
+}
+.fn  { width: 36px; font-size: 11px; font-weight: 700; color: var(--accent); }
+.fhz { width: 56px; font-size: 9px; color: var(--text2); }
+.fbar-bg { flex: 1; height: 3px; background: var(--bg3); border-radius: 1px; overflow: hidden; }
+.fbar-fill { height: 100%; background: var(--accent); border-radius: 1px; }
+.fcts { width: 38px; text-align: right; font-size: 9px; }
+
+/* ── SECTION LABEL ── */
+.slbl {
+  font-size: 8px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--text3); margin-bottom: 5px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.sep { height: 1px; background: var(--border); margin: 8px 0; }
+
+/* ── METRIC GRID ── */
+.mg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.mb {
+  background: var(--bg3); border: 1px solid var(--border);
+  padding: 7px 8px; border-radius: 2px;
+}
+.ml-lbl { font-size: 7px; letter-spacing: 2px; text-transform: uppercase; color: var(--text3); margin-bottom: 3px; }
+.mv { font-family: var(--disp); font-size: 24px; font-weight: 700; color: var(--text); line-height: 1; }
+.mv.g { color: var(--midi); }
+.mv.w { color: var(--accent2); }
+.mv.b { color: var(--wrong); }
+
+/* ── BUTTONS ── */
+.btn {
+  width: 100%; padding: 7px; margin-bottom: 5px;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text2); font-family: var(--mono); font-size: 9px;
+  letter-spacing: 2px; text-transform: uppercase;
+  cursor: pointer; border-radius: 2px; transition: all .15s;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(255,107,26,.07); }
+.btn.primary { border-color: var(--accent); color: var(--accent); }
+.btn.primary:hover { background: rgba(255,107,26,.15); }
+.btn.green { border-color: var(--midi); color: var(--midi); }
+.btn.green:hover { background: rgba(26,240,154,.1); }
+.btn.active { background: rgba(26,240,154,.15); border-color: var(--midi); color: var(--midi); }
+.btn:disabled { opacity: .3; cursor: not-allowed; }
+
+/* ── PROGRESS ── */
+.prog-bg { height: 2px; background: var(--bg3); border-radius: 1px; margin: 5px 0; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--accent); border-radius: 1px; transition: width .3s; width: 0%; }
+
+/* ── TOGGLE ── */
+.trow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.tlbl { font-size: 9px; color: var(--text2); }
+.tgl {
+  width: 30px; height: 15px; background: var(--bg3);
+  border: 1px solid var(--border); border-radius: 8px;
+  position: relative; cursor: pointer; transition: background .2s;
+  flex-shrink: 0;
+}
+.tgl::after {
+  content: ''; position: absolute;
+  width: 11px; height: 11px; background: var(--text3);
+  border-radius: 50%; top: 1px; left: 1px;
+  transition: left .2s, background .2s;
+}
+.tgl.on { background: var(--accent); border-color: var(--accent); }
+.tgl.on::after { left: 16px; background: #fff; }
+.tgl.on2 { background: var(--midi); border-color: var(--midi); }
+.tgl.on2::after { left: 16px; background: #fff; }
+
+/* ── CONFIDENCE BARS ── */
+.cbar-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.cl { width: 40px; font-size: 10px; color: var(--text2); }
+.cbb { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+.cbf { height: 100%; border-radius: 2px; transition: width .15s; }
+.cbf.au  { background: var(--accent); }
+.cbf.ml  { background: #44aaff; }
+.cv { width: 30px; text-align: right; font-size: 9px; color: var(--text2); }
+
+/* ── CODE BLOCK ── */
+.code-box {
+  background: var(--bg); border-left: 2px solid var(--accent);
+  padding: 8px; font-size: 9px; color: var(--text2);
+  white-space: pre; overflow-x: auto; border-radius: 1px;
+  line-height: 1.6; margin-top: 6px;
+}
+
+/* ── ACTIVITY LOG ── */
+.act-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 5px; background: var(--bg3);
+  border-radius: 1px; margin-bottom: 3px; font-size: 9px;
+}
+
+/* ── PIANO ── */
+#piano-section {
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  display: flex; flex-direction: column;
+}
+#piano-canvas { display: block; width: 100%; height: 100%; }
+
+/* ── STATUS BAR ── */
+#status-bar {
+  background: var(--bg); border-top: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 12px; gap: 16px; overflow: hidden;
+}
+.sbar-tag { font-size: 8px; letter-spacing: 3px; text-transform: uppercase; color: var(--text3); flex-shrink: 0; }
+#log-feed { flex: 1; overflow: hidden; display: flex; gap: 20px; }
+.le {
+  font-size: 9px; color: var(--text2); flex-shrink: 0;
+  opacity: 0; animation: fadeIn .25s forwards;
+}
+.le.i { color: var(--accent2); }
+.le.p { color: var(--midi); }
+.le.f { color: var(--wrong); }
+@keyframes fadeIn { to { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div id="header">
+  <div class="logo-block">
+    <div class="logo-title">PianoML</div>
+    <div class="logo-sub">Neural Piano Transcription Engine</div>
+  </div>
+  <div class="divider"></div>
+  <div class="status-bar">
+    <div class="indicator"><div class="dot" id="dot-mic"></div>Mic</div>
+    <div class="indicator"><div class="dot" id="dot-midi"></div>MIDI</div>
+    <div class="indicator"><div class="dot" id="dot-model"></div>Model</div>
+    <div class="indicator" id="fft-res-label" style="color:var(--text3)">—</div>
+  </div>
+  <div class="header-right">
+    <div class="vu" id="vu">
+      <span style="height:4px"></span><span style="height:6px"></span>
+      <span style="height:8px"></span><span style="height:5px"></span>
+      <span style="height:3px"></span><span style="height:7px"></span>
+      <span style="height:5px"></span><span style="height:4px"></span>
+    </div>
+    <button id="start-btn" onclick="toggleCapture()">START</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- COL 1: Spectrogram -->
+  <div class="panel">
+    <div class="ph">
+      <span>Spectrogram · FFT</span>
+      <span class="ph-val" id="thresh-val">thresh —</span>
+    </div>
+    <div class="pb">
+      <canvas id="spec-canvas"></canvas>
+    </div>
+  </div>
+
+  <!-- COL 2: Detection tabs -->
+  <div class="panel">
+    <div class="tabs">
+      <button class="tab on" onclick="switchTab('detect',this)">Detect</button>
+      <button class="tab" onclick="switchTab('chord',this)">Chord · ML</button>
+      <button class="tab" onclick="switchTab('train',this)">Train</button>
+      <button class="tab" onclick="switchTab('export',this)">Export</button>
+    </div>
+
+    <!-- DETECT TAB -->
+    <div class="tc on" id="tc-detect">
+      <div class="chord-name" id="chord-display">
+        <span class="chord-root">—</span>
+      </div>
+      <div class="sep"></div>
+      <div id="freq-list" style="margin-bottom:10px">
+        <div style="color:var(--text3);font-size:10px">Waiting for audio input…</div>
+      </div>
+      <div class="sep"></div>
+      <div class="slbl" style="margin-top:0">Audio Detected</div>
+      <div class="chip-row" id="audio-chips"></div>
+      <div class="slbl" style="margin-top:8px">MIDI Ground Truth</div>
+      <div class="chip-row" id="midi-chips"></div>
+      <div class="slbl" style="margin-top:8px">Agreement</div>
+      <div class="chip-row" id="agree-chips"></div>
+    </div>
+
+    <!-- CHORD / ML TAB -->
+    <div class="tc" id="tc-chord">
+      <div class="slbl">ML Model — Note Probabilities</div>
+      <div id="ml-conf-list" style="margin-bottom:10px">
+        <div style="color:var(--text3);font-size:10px">Train model to see predictions…</div>
+      </div>
+      <div class="slbl" style="margin-top:0">Audio Detection Confidence</div>
+      <div id="au-conf-list"></div>
+    </div>
+
+    <!-- TRAIN TAB -->
+    <div class="tc" id="tc-train">
+      <div class="mg">
+        <div class="mb"><div class="ml-lbl">Accuracy</div><div class="mv" id="m-acc">—</div></div>
+        <div class="mb"><div class="ml-lbl">Samples</div><div class="mv" id="m-samp">0</div></div>
+        <div class="mb"><div class="ml-lbl">Epochs</div><div class="mv" id="m-ep">0</div></div>
+        <div class="mb"><div class="ml-lbl">Loss</div><div class="mv" id="m-loss">—</div></div>
+      </div>
+      <div class="prog-bg"><div class="prog-fill" id="train-prog"></div></div>
+      <button class="btn primary" id="btn-train" onclick="trainModel()">▶ Train Now</button>
+      <button class="btn green" id="btn-auto" onclick="toggleAutoTrain()">Auto Train: OFF</button>
+      <div class="sep"></div>
+      <div class="trow"><span class="tlbl">Use ML for Detection</span><div class="tgl" id="tgl-ml" onclick="toggleFlag('ml')"></div></div>
+      <div class="trow"><span class="tlbl">Adaptive Threshold</span><div class="tgl on" id="tgl-at" onclick="toggleFlag('at')"></div></div>
+      <div class="trow"><span class="tlbl">Transpose Correction</span><div class="tgl on" id="tgl-tc" onclick="toggleFlag('tp')"></div></div>
+      <div class="trow"><span class="tlbl">Harmonic Weighting</span><div class="tgl on" id="tgl-hw" onclick="toggleFlag('hw')"></div></div>
+    </div>
+
+    <!-- EXPORT TAB -->
+    <div class="tc" id="tc-export">
+      <button class="btn primary" onclick="exportModel()">⬇ Export Model Weights (.json)</button>
+      <button class="btn" onclick="document.getElementById('fi').click()">⬆ Import Model Weights</button>
+      <input type="file" id="fi" style="display:none" accept=".json,.bin" onchange="importModel(event)">
+      <button class="btn green" onclick="exportSession()">⬇ Export Session Data (.json)</button>
+      <button class="btn" onclick="saveToLocalStorage()">💾 Save to Browser Storage</button>
+      <button class="btn" onclick="loadFromLocalStorage()">📂 Load from Browser Storage</button>
+      <div class="sep"></div>
+      <div class="slbl" style="margin-top:0">Hugging Face Upload (Python)</div>
+      <div class="code-box">pip install huggingface_hub trackio
+
+# upload_hf.py
+from huggingface_hub import login, upload_folder
+import json, os
+
+login()  # uses HF_TOKEN env var or prompts
+
+# Export from browser → save as piano_ml_export/
+upload_folder(
+  folder_path="./piano_ml_export",
+  repo_id="Pj156/ML",
+  repo_type="dataset",
+  commit_message=f"Session upload"
+)
+
+print("✓ Uploaded to Hugging Face")</div>
+    </div>
+  </div>
+
+  <!-- COL 3: Stats -->
+  <div class="panel">
+    <div class="ph">
+      <span>Session Stats</span>
+      <span class="ph-val" id="sess-time">00:00</span>
+    </div>
+    <div class="tc on" style="display:block; padding:10px; overflow-y:auto; flex:1;">
+      <div class="mg">
+        <div class="mb"><div class="ml-lbl">Pass</div><div class="mv g" id="s-pass">0</div></div>
+        <div class="mb"><div class="ml-lbl">Fail</div><div class="mv b" id="s-fail">0</div></div>
+        <div class="mb"><div class="ml-lbl">Total</div><div class="mv" id="s-total">0</div></div>
+        <div class="mb"><div class="ml-lbl">Score %</div><div class="mv" id="s-score">—</div></div>
+      </div>
+      <div class="sep"></div>
+      <div class="slbl" style="margin-top:0">Activity Log</div>
+      <div id="act-log"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PIANO -->
+<div id="piano-section">
+  <div class="ph">
+    <span>Keyboard · A0 → C8 · 88 Keys</span>
+    <span class="ph-val" id="key-active">0 active</span>
+  </div>
+  <div style="flex:1;overflow:hidden">
+    <canvas id="piano-canvas"></canvas>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div id="status-bar">
+  <span class="sbar-tag">LOG</span>
+  <div id="log-feed"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CONSTANTS
+// ═══════════════════════════════════════════════════════════
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const IS_WHITE   = [true,false,true,false,true,true,false,true,false,true,false,true];
+const MIDI_MIN   = 21;   // A0
+const MIDI_MAX   = 108;  // C8
+const FFT_SIZE   = 16384;
+const SAMPLE_RATE = 44100;
+const FREQ_RES   = SAMPLE_RATE / FFT_SIZE;  // ~2.69 Hz/bin
+
+// Build MIDI note table (88 entries)
+const NOTES = [];
+for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+  const freq  = 440 * Math.pow(2, (m - 69) / 12);
+  const oct   = Math.floor(m / 12) - 1;
+  const sname = NOTE_NAMES[m % 12];
+  NOTES.push({ midi: m, freq, name: sname + oct, short: sname, oct });
+}
+
+// Chord templates [intervals from root]
+const CHORD_TMPL = [
+  { q: '',      i: [0,4,7] },
+  { q: 'm',     i: [0,3,7] },
+  { q: '7',     i: [0,4,7,10] },
+  { q: 'maj7',  i: [0,4,7,11] },
+  { q: 'm7',    i: [0,3,7,10] },
+  { q: 'dim',   i: [0,3,6] },
+  { q: 'aug',   i: [0,4,8] },
+  { q: 'sus4',  i: [0,5,7] },
+  { q: 'sus2',  i: [0,2,7] },
+  { q: '6',     i: [0,4,7,9] },
+  { q: 'add9',  i: [0,2,4,7] },
+  { q: '9',     i: [0,4,7,10,14] },
+];
+
+// Harmonic weights for note scoring
+const HARMONIC_W = [1.0, 0.55, 0.35, 0.25, 0.15];
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let audioCtx = null, analyser = null, micStream = null;
+let isCapturing  = false;
+let rafId        = null;
+
+// MIDI
+let midiAccess  = null;
+let midiActive  = new Set();   // active MIDI note numbers
+
+// Detection results
+let audioNotes  = [];  // [{midi,name,short,freq,energy,confidence,cents}]
+let mlPreds     = null; // Float32Array(88) or null
+
+// ML
+let model = null;
+let trainData = [];    // [{feat:Float32Array(88), lbl:Float32Array(88)}]
+let totalEpochs = 0;
+let lastLoss = null;
+
+// Flags
+let flags = { ml: false, at: true, tp: true, hw: true };
+let autoTrain = false;
+let adaptThresh = 0.08;
+
+// Session
+let sessStart = null;
+let passN = 0, failN = 0;
+
+// Piano key positions (precomputed)
+const keyXPos = {};  // midi -> {x, isWhite}
+
+// ═══════════════════════════════════════════════════════════
+// CANVAS REFS
+// ═══════════════════════════════════════════════════════════
+const specCvs  = document.getElementById('spec-canvas');
+const specCtx  = specCvs.getContext('2d');
+const pianoCvs = document.getElementById('piano-canvas');
+const pianoCtx = pianoCvs.getContext('2d');
+
+// ═══════════════════════════════════════════════════════════
+// RESIZE
+// ═══════════════════════════════════════════════════════════
+function resize() {
+  const specPB = document.querySelector('#main .panel .pb');
+  if (specPB) {
+    specCvs.width  = specPB.clientWidth;
+    specCvs.height = specPB.clientHeight;
+  }
+  const pianoSec = document.getElementById('piano-section');
+  const pianoInner = pianoSec.querySelector('div[style]');
+  if (pianoInner) {
+    pianoCvs.width  = pianoInner.clientWidth;
+    pianoCvs.height = pianoInner.clientHeight;
+  }
+  precomputeKeyPositions();
+  drawPiano();
+}
+window.addEventListener('resize', resize);
+setTimeout(resize, 120);
+
+function precomputeKeyPositions() {
+  const w = pianoCvs.width;
+  const h = pianoCvs.height;
+  if (!w || !h) return;
+
+  let wCount = 0;
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (IS_WHITE[m % 12]) wCount++;
+  }
+
+  const ww = w / wCount;
+  const bw = ww * 0.58;
+
+  let wi = 0;
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (IS_WHITE[m % 12]) {
+      keyXPos[m] = { x: wi * ww, w: ww, isWhite: true };
+      wi++;
+    }
+  }
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (!IS_WHITE[m % 12]) {
+      const px = keyXPos[m - 1] ? keyXPos[m - 1].x + keyXPos[m - 1].w - bw / 2 : 0;
+      keyXPos[m] = { x: px, w: bw, isWhite: false };
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUDIO ENGINE
+// ═══════════════════════════════════════════════════════════
+async function startCapture() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: SAMPLE_RATE }
+    });
+    micStream = audioCtx.createMediaStreamSource(stream);
+    analyser  = audioCtx.createAnalyser();
+    analyser.fftSize = FFT_SIZE;
+    analyser.smoothingTimeConstant = 0.72;
+    micStream.connect(analyser);
+    isCapturing = true;
+    sessStart = Date.now();
+    document.getElementById('dot-mic').className = 'dot on';
+    document.getElementById('start-btn').textContent = 'STOP';
+    document.getElementById('start-btn').classList.add('running');
+    document.getElementById('fft-res-label').textContent = `${FFT_SIZE} FFT · ${FREQ_RES.toFixed(2)} Hz/bin`;
+    log('Microphone started', 'i');
+    rafLoop();
+  } catch(e) {
+    log('Mic error: ' + e.message, 'f');
+  }
+}
+
+function stopCapture() {
+  isCapturing = false;
+  if (rafId) cancelAnimationFrame(rafId);
+  if (micStream) { micStream.disconnect(); micStream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  document.getElementById('dot-mic').className = 'dot';
+  document.getElementById('start-btn').textContent = 'START';
+  document.getElementById('start-btn').classList.remove('running');
+  log('Capture stopped', 'i');
+}
+
+function toggleCapture() {
+  if (isCapturing) stopCapture(); else startCapture();
+}
+
+// ═══════════════════════════════════════════════════════════
+// MIDI ENGINE
+// ═══════════════════════════════════════════════════════════
+async function initMIDI() {
+  if (!navigator.requestMIDIAccess) { log('Web MIDI not available in this browser', 'f'); return; }
+  try {
+    midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+    midiAccess.inputs.forEach(inp => inp.onmidimessage = onMIDI);
+    midiAccess.onstatechange = (e) => {
+      if (e.port.type === 'input') {
+        e.port.onmidimessage = e.port.state === 'connected' ? onMIDI : null;
+        log('MIDI ' + e.port.state + ': ' + e.port.name, 'i');
+      }
+      refreshMIDIDot();
+    };
+    refreshMIDIDot();
+    const count = midiAccess.inputs.size;
+    log('MIDI ready — ' + count + ' input' + (count === 1 ? '' : 's') + ' found', 'i');
+  } catch(e) {
+    log('MIDI access denied', 'f');
+  }
+}
+
+function refreshMIDIDot() {
+  const has = midiAccess && midiAccess.inputs.size > 0;
+  document.getElementById('dot-midi').className = has ? 'dot on2' : 'dot';
+}
+
+function onMIDI(msg) {
+  const [s, note, vel] = msg.data;
+  const cmd = s & 0xF0;
+  if (cmd === 0x90 && vel > 0) midiActive.add(note);
+  else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) midiActive.delete(note);
+}
+
+// ═══════════════════════════════════════════════════════════
+// PITCH DETECTION  (Harmonic Product Spectrum)
+// ═══════════════════════════════════════════════════════════
+function detectNotes(magDB) {
+  const scores = new Float32Array(88);
+
+  for (let i = 0; i < 88; i++) {
+    const note = NOTES[i];
+    let score = 0;
+
+    for (let h = 0; h < HARMONIC_W.length; h++) {
+      const hFreq = note.freq * (h + 1);
+      const bin   = Math.round(hFreq / FREQ_RES);
+      if (bin >= magDB.length) continue;
+
+      let peak = -Infinity;
+      for (let b = Math.max(0, bin - 1); b <= Math.min(magDB.length - 1, bin + 1); b++) {
+        if (magDB[b] > peak) peak = magDB[b];
+      }
+      const linear = peak > -120 ? Math.pow(10, peak / 20) : 0;
+      score += linear * (flags.hw ? HARMONIC_W[h] : 1.0 / HARMONIC_W.length);
+    }
+    scores[i] = score;
+  }
+
+  const maxScore = Math.max(...scores);
+  if (maxScore < 1e-10) return [];
+
+  // Adaptive threshold update
+  if (flags.at) {
+    const mean = scores.reduce((a, b) => a + b, 0) / 88;
+    adaptThresh = 0.93 * adaptThresh + 0.07 * Math.max(0.05, (mean / maxScore) * 2.5);
+    adaptThresh  = Math.min(0.35, Math.max(0.02, adaptThresh));
+    document.getElementById('thresh-val').textContent = 'thresh ' + (adaptThresh * 100).toFixed(1) + '%';
+  }
+
+  const threshold = flags.at ? adaptThresh * maxScore : 0.06 * maxScore;
+
+  // Peak picking — local maxima only
+  const candidates = [];
+  for (let i = 1; i < 87; i++) {
+    if (scores[i] > threshold && scores[i] >= scores[i - 1] && scores[i] >= scores[i + 1]) {
+      candidates.push({ idx: i, score: scores[i] });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+
+  return candidates.slice(0, 5).map(c => {
+    const note = NOTES[c.idx];
+    const confidence = c.score / maxScore;
+
+    // Cents deviation
+    const bin     = Math.round(note.freq / FREQ_RES);
+    let peakBin   = bin;
+    for (let b = Math.max(0, bin - 2); b <= Math.min(magDB.length - 1, bin + 2); b++) {
+      if (magDB[b] > magDB[peakBin]) peakBin = b;
+    }
+    const actualFreq = peakBin * FREQ_RES;
+    const cents = actualFreq > 0 ? Math.round(1200 * Math.log2(actualFreq / note.freq) * 10) / 10 : 0;
+
+    return { ...note, confidence, energy: c.score, cents, actualFreq };
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUDIO FEATURES (88-dim vector for ML)
+// ═══════════════════════════════════════════════════════════
+function extractFeatures(magDB) {
+  const feat = new Float32Array(88);
+  for (let i = 0; i < 88; i++) {
+    const bin = Math.round(NOTES[i].freq / FREQ_RES);
+    if (bin >= magDB.length) continue;
+    const db = magDB[bin];
+    feat[i] = Math.max(0, Math.min(1, (db + 100) / 100));
+  }
+  return feat;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CHORD DETECTION
+// ═══════════════════════════════════════════════════════════
+function detectChord(midiArr) {
+  if (!midiArr.length) return '—';
+  if (midiArr.length === 1) return NOTES[midiArr[0] - MIDI_MIN]?.short || '?';
+
+  const sorted = [...midiArr].sort((a, b) => a - b);
+  const intervals = sorted.map(n => (n - sorted[0]) % 12).sort((a, b) => a - b);
+  const intSet = new Set(intervals);
+
+  let best = null, bestScore = 0;
+  for (const t of CHORD_TMPL) {
+    let hit = 0;
+    for (const iv of t.i) { if (intSet.has(iv % 12)) hit++; }
+    const score = hit / Math.max(t.i.length, intervals.length);
+    if (score > bestScore) { bestScore = score; best = t; }
+  }
+
+  const rootName = NOTES[sorted[0] - MIDI_MIN]?.short || '?';
+  if (bestScore < 0.55) {
+    return sorted.map(n => NOTES[n - MIDI_MIN]?.short || '?').join('/');
+  }
+  return rootName + (best?.q || '');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ML MODEL (TensorFlow.js)
+// ═══════════════════════════════════════════════════════════
+async function initModel() {
+  model = tf.sequential({
+    layers: [
+      tf.layers.dense({ inputShape: [88], units: 256, activation: 'relu',
+        kernelInitializer: 'glorotNormal' }),
+      tf.layers.batchNormalization(),
+      tf.layers.dropout({ rate: 0.3 }),
+      tf.layers.dense({ units: 128, activation: 'relu' }),
+      tf.layers.dropout({ rate: 0.2 }),
+      tf.layers.dense({ units: 88, activation: 'sigmoid' }),
+    ]
+  });
+  model.compile({
+    optimizer: tf.train.adam(0.0008),
+    loss: 'binaryCrossentropy',
+    metrics: ['accuracy']
+  });
+  document.getElementById('dot-model').className = 'dot on3';
+  log('TF.js model ready (88→256→BN→128→88)', 'i');
+}
+
+async function runMLPrediction(feat) {
+  if (!model || !flags.ml) return null;
+  const t = tf.tensor2d([Array.from(feat)]);
+  const out = model.predict(t);
+  const data = await out.data();
+  t.dispose(); out.dispose();
+  return data;
+}
+
+async function trainModel() {
+  if (!model) { log('No model initialized', 'f'); return; }
+  if (trainData.length < 5) { log(`Need ≥5 samples (have ${trainData.length})`, 'f'); return; }
+
+  document.getElementById('btn-train').disabled = true;
+  log(`Training on ${trainData.length} samples…`, 'i');
+
+  const xs = tf.tensor2d(trainData.map(d => Array.from(d.feat)));
+  const ys = tf.tensor2d(trainData.map(d => Array.from(d.lbl)));
+
+  await model.fit(xs, ys, {
+    epochs: 25,
+    batchSize: Math.min(64, trainData.length),
+    shuffle: true,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        totalEpochs++;
+        lastLoss = logs.loss;
+        const prog = ((epoch + 1) / 25) * 100;
+        document.getElementById('train-prog').style.width = prog + '%';
+        document.getElementById('m-ep').textContent   = totalEpochs;
+        document.getElementById('m-loss').textContent = logs.loss.toFixed(4);
+        const acc = logs.acc ?? logs.accuracy ?? 0;
+        const accEl = document.getElementById('m-acc');
+        accEl.textContent = (acc * 100).toFixed(1) + '%';
+        accEl.className = 'mv ' + (acc > 0.8 ? 'g' : acc > 0.5 ? 'w' : 'b');
+      }
+    }
+  });
+
+  xs.dispose(); ys.dispose();
+  document.getElementById('btn-train').disabled = false;
+  log(`Training done. Loss: ${lastLoss?.toFixed(4)}`, 'p');
+}
+
+function recordTrainingSample(feat, midiSet) {
+  const lbl = new Float32Array(88);
+  for (const m of midiSet) {
+    const i = m - MIDI_MIN;
+    if (i >= 0 && i < 88) lbl[i] = 1;
+  }
+  trainData.push({ feat: feat.slice(), lbl });
+  if (trainData.length > 8000) trainData.shift();
+  document.getElementById('m-samp').textContent = trainData.length;
+  if (autoTrain && trainData.length % 150 === 0) trainModel();
+}
+
+// ═══════════════════════════════════════════════════════════
+// AGREEMENT LAYER
+// ═══════════════════════════════════════════════════════════
+function computeAgreement(audNotes, midiSet) {
+  const audSet = new Set(audNotes.map(n => n.midi));
+  return {
+    correct: [...audSet].filter(m => midiSet.has(m)),
+    missed:  [...midiSet].filter(m => !audSet.has(m)),
+    extra:   [...audSet].filter(m => !midiSet.has(m)),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// SPECTROGRAM DRAWING
+// ═══════════════════════════════════════════════════════════
+function drawSpectrogram(magDB) {
+  const W = specCvs.width;
+  const H = specCvs.height;
+  if (!W || !H) return;
+
+  // Scroll left by 1px
+  const img = specCtx.getImageData(1, 0, W - 1, H);
+  specCtx.putImageData(img, 0, 0);
+
+  // New column on right
+  const maxFreq   = 6000;
+  const maxBin    = Math.min(Math.round(maxFreq / FREQ_RES), magDB.length - 1);
+  const midiFreqs = new Set();
+
+  for (const m of midiActive) {
+    const n = NOTES[m - MIDI_MIN];
+    if (n) {
+      const b = Math.round(n.freq / FREQ_RES);
+      midiFreqs.add(b); midiFreqs.add(b + 1); midiFreqs.add(b - 1);
+    }
+  }
+
+  for (let py = 0; py < H; py++) {
+    const bin = Math.floor((1 - py / H) * maxBin);
+    const db  = magDB[bin] ?? -120;
+    const n   = Math.max(0, Math.min(1, (db + 90) / 75));
+    const isMidiFreq = midiFreqs.has(bin);
+
+    let r, g, b2;
+    if (isMidiFreq && n > 0.25) {
+      // Mint highlight for MIDI-confirmed frequencies
+      r = Math.floor(26  * n);
+      g = Math.floor(240 * n);
+      b2= Math.floor(154 * n);
+    } else {
+      // Amber heatmap: dark→orange→white
+      if (n < 0.5) {
+        const t = n * 2;
+        r = Math.floor(255 * t);
+        g = Math.floor(80  * t);
+        b2= Math.floor(10  * t);
+      } else {
+        const t = (n - 0.5) * 2;
+        r = 255;
+        g = Math.floor(80  + 175 * t);
+        b2= Math.floor(10  + 245 * t);
+      }
+    }
+
+    specCtx.fillStyle = `rgb(${r},${g},${b2})`;
+    specCtx.fillRect(W - 1, py, 1, 1);
+  }
+
+  // Frequency axis labels (left edge)
+  specCtx.fillStyle = 'rgba(58,58,66,0.9)';
+  specCtx.fillRect(0, 0, 42, H);
+  specCtx.font = '8px IBM Plex Mono';
+  specCtx.fillStyle = '#3a3a42';
+  const freqMarks = [100, 220, 440, 880, 1760, 3520];
+  for (const f of freqMarks) {
+    const y = H - Math.round((f / maxFreq) * H);
+    if (y < 0 || y > H) continue;
+    specCtx.fillStyle = '#444450';
+    specCtx.fillRect(0, y, 42, 1);
+    specCtx.fillStyle = '#666670';
+    specCtx.fillText(f >= 1000 ? (f / 1000).toFixed(1) + 'k' : f + '', 2, y - 2);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PIANO DRAWING
+// ═══════════════════════════════════════════════════════════
+function drawPiano() {
+  const W = pianoCvs.width;
+  const H = pianoCvs.height;
+  if (!W || !H) return;
+  pianoCtx.clearRect(0, 0, W, H);
+
+  const bkH = H * 0.62;
+
+  // Detect from ML if enabled and prediction available
+  const mlSet = new Set();
+  if (flags.ml && mlPreds) {
+    for (let i = 0; i < 88; i++) {
+      if (mlPreds[i] > 0.45) mlSet.add(i + MIDI_MIN);
+    }
+  }
+
+  // White keys first
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (!IS_WHITE[m % 12]) continue;
+    const kp = keyXPos[m];
+    if (!kp) continue;
+    const isAu = audioNotes.some(n => n.midi === m);
+    const isMi = midiActive.has(m);
+    const isMl = mlSet.has(m);
+
+    let fill;
+    if (isAu && isMi)     fill = '#1af09a';
+    else if (isMi)        fill = '#44c090';
+    else if (isAu && isMl) fill = '#88ddff';
+    else if (isAu)        fill = '#ff6b1a';
+    else if (isMl)        fill = '#3388aa';
+    else                  fill = '#c2c2ba';
+
+    pianoCtx.fillStyle = fill;
+    pianoCtx.fillRect(kp.x + 0.5, 0, kp.w - 1, H - 1);
+    pianoCtx.strokeStyle = '#222';
+    pianoCtx.lineWidth = 0.5;
+    pianoCtx.strokeRect(kp.x + 0.5, 0, kp.w - 1, H - 1);
+  }
+
+  // Black keys on top
+  for (let m = MIDI_MIN; m <= MIDI_MAX; m++) {
+    if (IS_WHITE[m % 12]) continue;
+    const kp = keyXPos[m];
+    if (!kp) continue;
+    const isAu = audioNotes.some(n => n.midi === m);
+    const isMi = midiActive.has(m);
+    const isMl = mlSet.has(m);
+
+    let fill;
+    if (isAu && isMi)     fill = '#0a8855';
+    else if (isMi)        fill = '#086644';
+    else if (isAu && isMl) fill = '#2266aa';
+    else if (isAu)        fill = '#cc4800';
+    else if (isMl)        fill = '#1a4466';
+    else                  fill = '#111116';
+
+    pianoCtx.fillStyle = fill;
+    pianoCtx.fillRect(kp.x, 0, kp.w, bkH);
+    pianoCtx.strokeStyle = '#333';
+    pianoCtx.lineWidth = 0.5;
+    pianoCtx.strokeRect(kp.x, 0, kp.w, bkH);
+  }
+
+  // Key active count
+  const totalActive = audioNotes.length + midiActive.size;
+  document.getElementById('key-active').textContent = totalActive + ' active';
+}
+
+// ═══════════════════════════════════════════════════════════
+// VU METER
+// ═══════════════════════════════════════════════════════════
+function updateVU(magDB) {
+  const freqs = [60, 120, 250, 500, 1000, 2000, 4000, 8000];
+  const bars  = document.querySelectorAll('#vu span');
+  bars.forEach((bar, i) => {
+    const bin = Math.round(freqs[i] / FREQ_RES);
+    const db  = magDB[Math.min(bin, magDB.length - 1)] ?? -100;
+    const n   = Math.max(0, Math.min(1, (db + 80) / 60));
+    const h   = Math.max(2, Math.round(n * 16));
+    bar.style.height     = h + 'px';
+    bar.style.background = n > 0.75 ? '#ff2255' : n > 0.45 ? '#ff6b1a' : '#3a3a42';
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// UI UPDATES
+// ═══════════════════════════════════════════════════════════
+function updateUI(feat) {
+  // Chord display
+  const activeArr = audioNotes.map(n => n.midi);
+  const chord = detectChord(activeArr.length ? activeArr : [...midiActive]);
+  const root  = chord[0] || '—';
+  const qual  = chord.slice(1) || '';
+  document.getElementById('chord-display').innerHTML =
+    `<span class="chord-root">${root}</span><span class="chord-qual">${qual}</span>`;
+
+  // Freq list
+  const fl = document.getElementById('freq-list');
+  fl.innerHTML = '';
+  if (!audioNotes.length) {
+    fl.innerHTML = '<div style="color:var(--text3);font-size:10px">No notes detected…</div>';
+  } else {
+    for (const n of audioNotes) {
+      const centsStr  = n.cents >= 0 ? `+${n.cents}¢` : `${n.cents}¢`;
+      const centsClr  = Math.abs(n.cents) > 20 ? 'var(--wrong)' : Math.abs(n.cents) > 10 ? 'var(--accent2)' : 'var(--text3)';
+      const row = document.createElement('div');
+      row.className = 'frow';
+      row.innerHTML = `
+        <div class="fn">${n.name}</div>
+        <div class="fhz">${n.freq.toFixed(1)}Hz</div>
+        <div class="fbar-bg"><div class="fbar-fill" style="width:${(n.confidence*100).toFixed(0)}%"></div></div>
+        <div class="fcts" style="color:${centsClr}">${centsStr}</div>`;
+      fl.appendChild(row);
+    }
+  }
+
+  // Audio chips
+  const ac = document.getElementById('audio-chips');
+  ac.innerHTML = audioNotes.length
+    ? audioNotes.map(n => `<div class="chip au">${n.name}</div>`).join('')
+    : '<span style="color:var(--text3)">—</span>';
+
+  // MIDI chips
+  const mc = document.getElementById('midi-chips');
+  mc.innerHTML = midiActive.size
+    ? [...midiActive].map(m => {
+        const nd = NOTES[m - MIDI_MIN];
+        return `<div class="chip mi">${nd?.name || m}</div>`;
+      }).join('')
+    : '<span style="color:var(--text3)">—</span>';
+
+  // Agreement
+  const agree = computeAgreement(audioNotes, midiActive);
+  const agc = document.getElementById('agree-chips');
+  let agHtml = '';
+  agree.correct.forEach(m => { const n = NOTES[m-MIDI_MIN]; agHtml += `<div class="chip ok">${n?.name}</div>`; });
+  agree.missed.forEach(m  => { const n = NOTES[m-MIDI_MIN]; agHtml += `<div class="chip err">✗${n?.name}</div>`; });
+  agree.extra.forEach(m   => { const n = NOTES[m-MIDI_MIN]; agHtml += `<div class="chip ex">+${n?.name}</div>`; });
+  agc.innerHTML = agHtml || '<span style="color:var(--text3)">—</span>';
+
+  // Log pass/fail
+  if (midiActive.size > 0) {
+    if (agree.correct.length === midiActive.size && agree.extra.length === 0) {
+      passN++;
+      addActivity('PASS', detectChord([...midiActive]), 'g');
+    } else if (agree.missed.length === midiActive.size && audioNotes.length > 0) {
+      failN++;
+      addActivity('MISS', detectChord([...midiActive]) + ' ≠ ' + detectChord(audioNotes.map(n=>n.midi)), 'b');
+    }
+  }
+
+  // Stats
+  document.getElementById('s-pass').textContent  = passN;
+  document.getElementById('s-fail').textContent  = failN;
+  const tot = passN + failN;
+  document.getElementById('s-total').textContent = tot;
+  if (tot > 0) {
+    const sc = (passN / tot * 100).toFixed(1);
+    const sel = document.getElementById('s-score');
+    sel.textContent = sc + '%';
+    sel.className = 'mv ' + (sc >= 80 ? 'g' : sc >= 50 ? 'w' : 'b');
+  }
+
+  // Session time
+  if (sessStart) {
+    const secs  = Math.floor((Date.now() - sessStart) / 1000);
+    const mm    = String(Math.floor(secs / 60)).padStart(2,'0');
+    const ss    = String(secs % 60).padStart(2,'0');
+    document.getElementById('sess-time').textContent = mm + ':' + ss;
+  }
+
+  // Confidence list (chord tab)
+  const auConf = document.getElementById('au-conf-list');
+  auConf.innerHTML = '';
+  for (const n of audioNotes) {
+    const row = document.createElement('div');
+    row.className = 'cbar-row';
+    row.innerHTML = `
+      <div class="cl">${n.name}</div>
+      <div class="cbb"><div class="cbf au" style="width:${(n.confidence*100).toFixed(0)}%"></div></div>
+      <div class="cv">${(n.confidence*100).toFixed(0)}%</div>`;
+    auConf.appendChild(row);
+  }
+
+  // ML predictions (chord tab)
+  if (mlPreds) {
+    const mlConf = document.getElementById('ml-conf-list');
+    mlConf.innerHTML = '';
+    const top = [];
+    for (let i = 0; i < 88; i++) {
+      if (mlPreds[i] > 0.25) top.push({ i, val: mlPreds[i] });
+    }
+    top.sort((a, b) => b.val - a.val);
+    const show = top.slice(0, 8);
+    if (!show.length) {
+      mlConf.innerHTML = '<div style="color:var(--text3);font-size:10px">No predictions above threshold</div>';
+    } else {
+      for (const t of show) {
+        const row = document.createElement('div');
+        row.className = 'cbar-row';
+        row.innerHTML = `
+          <div class="cl">${NOTES[t.i]?.name}</div>
+          <div class="cbb"><div class="cbf ml" style="width:${(t.val*100).toFixed(0)}%"></div></div>
+          <div class="cv">${(t.val*100).toFixed(0)}%</div>`;
+        mlConf.appendChild(row);
+      }
+    }
+  }
+}
+
+function addActivity(type, label, cls) {
+  const al = document.getElementById('act-log');
+  const row = document.createElement('div');
+  row.className = 'act-row';
+  const clr = cls === 'g' ? 'var(--midi)' : 'var(--wrong)';
+  const time = new Date().toLocaleTimeString('en',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  row.innerHTML = `
+    <span style="color:${clr};font-weight:700">${type}</span>
+    <span style="color:var(--text2)">${label}</span>
+    <span style="color:var(--text3)">${time}</span>`;
+  al.insertBefore(row, al.firstChild);
+  if (al.children.length > 60) al.removeChild(al.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAIN RENDER LOOP
+// ═══════════════════════════════════════════════════════════
+async function rafLoop() {
+  if (!isCapturing) return;
+  rafId = requestAnimationFrame(rafLoop);
+
+  const magDB = new Float32Array(analyser.frequencyBinCount);
+  analyser.getFloatFrequencyData(magDB);
+
+  // VU
+  updateVU(magDB);
+
+  // Detect notes
+  audioNotes = detectNotes(magDB);
+
+  // Extract features
+  const feat = extractFeatures(magDB);
+
+  // Record training sample when MIDI is playing
+  if (midiActive.size > 0) {
+    recordTrainingSample(feat, midiActive);
+  }
+
+  // ML prediction
+  mlPreds = await runMLPrediction(feat);
+
+  // If ML override enabled, replace audio detections with ML predictions
+  if (flags.ml && mlPreds) {
+    const mlNotes = [];
+    for (let i = 0; i < 88; i++) {
+      if (mlPreds[i] > 0.5) {
+        mlNotes.push({ ...NOTES[i], confidence: mlPreds[i], energy: mlPreds[i], cents: 0 });
+      }
+    }
+    if (mlNotes.length > 0) audioNotes = mlNotes.sort((a,b) => b.confidence - a.confidence).slice(0,5);
+  }
+
+  // Draw
+  drawSpectrogram(magDB);
+  drawPiano();
+  updateUI(feat);
+}
+
+// ═══════════════════════════════════════════════════════════
+// TAB SWITCHING
+// ═══════════════════════════════════════════════════════════
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.querySelectorAll('.tc').forEach(t => t.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('tc-' + id).classList.add('on');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TOGGLE FLAGS
+// ═══════════════════════════════════════════════════════════
+function toggleFlag(key) {
+  flags[key] = !flags[key];
+  const idMap = { ml:'tgl-ml', at:'tgl-at', tp:'tgl-tc', hw:'tgl-hw' };
+  const el = document.getElementById(idMap[key]);
+  el.className = 'tgl' + (flags[key] ? ' on' : '');
+  if (key === 'ml') log('ML override: ' + (flags[key] ? 'ON' : 'OFF'), 'i');
+}
+
+function toggleAutoTrain() {
+  autoTrain = !autoTrain;
+  const btn = document.getElementById('btn-auto');
+  btn.textContent = 'Auto Train: ' + (autoTrain ? 'ON' : 'OFF');
+  btn.classList.toggle('active', autoTrain);
+  log('Auto-train: ' + (autoTrain ? 'ON (every 150 samples)' : 'OFF'), 'i');
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPORT / IMPORT
+// ═══════════════════════════════════════════════════════════
+async function exportModel() {
+  if (!model) { log('No model to export', 'f'); return; }
+  try {
+    await model.save('downloads://piano-ml-model');
+    log('Model exported to downloads/', 'p');
+  } catch(e) {
+    log('Export error: ' + e.message, 'f');
+  }
+}
+
+async function importModel(e) {
+  const files = e.target.files;
+  if (!files.length) return;
+  try {
+    const fileArr = Array.from(files);
+    const jsonFile = fileArr.find(f => f.name.endsWith('.json'));
+    const binFiles = fileArr.filter(f => f.name.endsWith('.bin'));
+    if (!jsonFile) { log('No .json file found', 'f'); return; }
+    model = await tf.loadLayersModel(tf.io.browserFiles([jsonFile, ...binFiles]));
+    model.compile({ optimizer: tf.train.adam(0.0008), loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+    document.getElementById('dot-model').className = 'dot on3';
+    log('Model loaded from file', 'p');
+  } catch(e) {
+    log('Import error: ' + e.message, 'f');
+  }
+}
+
+function exportSession() {
+  const payload = {
+    version: '1.1',
+    timestamp: new Date().toISOString(),
+    duration_s: sessStart ? Math.floor((Date.now() - sessStart) / 1000) : 0,
+    stats: { pass: passN, fail: failN, total: passN + failN,
+             accuracy: (passN + failN) > 0 ? passN / (passN + failN) : null },
+    model: { epochs: totalEpochs, lastLoss },
+    trainingSamples: trainData.length,
+    trainingData: trainData.map(d => ({
+      features: Array.from(d.feat),
+      labels:   Array.from(d.lbl),
+    }))
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `piano_ml_${Date.now()}.json`;
+  a.click();
+  log(`Session exported: ${trainData.length} samples`, 'p');
+}
+
+function saveToLocalStorage() {
+  try {
+    const miniData = trainData.slice(-500).map(d => ({
+      feat: Array.from(d.feat),
+      lbl:  Array.from(d.lbl),
+    }));
+    localStorage.setItem('pianomL_train', JSON.stringify(miniData));
+    localStorage.setItem('pianomL_stats', JSON.stringify({ passN, failN, totalEpochs }));
+    log('Saved to browser storage (last 500 samples)', 'p');
+  } catch(e) {
+    log('LocalStorage error: ' + e.message, 'f');
+  }
+}
+
+function loadFromLocalStorage() {
+  try {
+    const raw = localStorage.getItem('pianomL_train');
+    if (!raw) { log('No saved data found', 'f'); return; }
+    const loaded = JSON.parse(raw);
+    trainData = loaded.map(d => ({
+      feat: new Float32Array(d.feat),
+      lbl:  new Float32Array(d.lbl),
+    }));
+    document.getElementById('m-samp').textContent = trainData.length;
+    const stats = JSON.parse(localStorage.getItem('pianomL_stats') || '{}');
+    if (stats.passN)      passN      = stats.passN;
+    if (stats.failN)      failN      = stats.failN;
+    if (stats.totalEpochs) totalEpochs = stats.totalEpochs;
+    log(`Loaded ${trainData.length} training samples from storage`, 'p');
+  } catch(e) {
+    log('Load error: ' + e.message, 'f');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATUS LOG
+// ═══════════════════════════════════════════════════════════
+function log(msg, type = 'i') {
+  const feed = document.getElementById('log-feed');
+  const el = document.createElement('span');
+  el.className = 'le ' + type;
+  const time = new Date().toLocaleTimeString('en', { hour12: false });
+  el.textContent = `[${time}] ${msg}`;
+  feed.insertBefore(el, feed.firstChild);
+  if (feed.children.length > 24) feed.removeChild(feed.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+(async function init() {
+  log('PianoML initializing…', 'i');
+  await initModel();
+  await initMIDI();
+  resize();
+
+  // Draw placeholder piano
+  setTimeout(() => { precomputeKeyPositions(); drawPiano(); }, 200);
+
+  // Session timer
+  setInterval(() => { if (sessStart) { /* handled in updateUI */ } }, 1000);
+
+  log('Ready — press START to begin audio capture', 'i');
+})();
+</script>
+</body>
+</html>
